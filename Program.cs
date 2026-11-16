@@ -267,7 +267,7 @@ class MainWin : Window {
     readonly List<Row> rows = new List<Row>();
     readonly List<Tab> tabs = new List<Tab>();
     StackPanel listPanel; TextBox searchBox; TextBlock watermark;
-    StackPanel tabStrip; Grid tabContent; TextBlock emptyHint; Grid contentInner; TextBlock statusText;
+    StackPanel tabStrip; Grid tabContent; TextBlock emptyHint; Grid contentInner; TextBlock statusText; Border StatusBanner;
     Button maxBtn;
     Row selected;
     System.Collections.Generic.Dictionary<string, Border> groupHeaders = new System.Collections.Generic.Dictionary<string, Border>();
@@ -418,8 +418,8 @@ class MainWin : Window {
         side.Child = sideGrid; Grid.SetColumn(side,1); body.Children.Add(side);
 
         // 主区
-        var mainGrid = Rows(new GridLength(38), new GridLength(1,GridUnitType.Star));
-        var stripBorder = new Border { Background = T.B(T.BG1), BorderBrush = T.B(T.LINE), BorderThickness = new Thickness(0,0,0,1) };
+        var mainGrid = Rows(GridLength.Auto, new GridLength(1,GridUnitType.Star));
+        var stripBorder = new Border { Height = 38, Background = T.B(T.BG1), BorderBrush = T.B(T.LINE), BorderThickness = new Thickness(0,0,0,1) };
         tabStrip = new StackPanel { Orientation = Orientation.Horizontal };
         stripBorder.Child = new ScrollViewer { Content = tabStrip, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Grid.SetRow(stripBorder,0); mainGrid.Children.Add(stripBorder);
@@ -428,6 +428,7 @@ class MainWin : Window {
         contentInner = new Grid { Background = T.B(T.BG0) };
         tabContent.Children.Add(contentInner);
         var statusBar = new Border { Background = T.B(T.BG1), BorderBrush = T.B(T.LINE), BorderThickness = new Thickness(0,1,0,0), Padding = new Thickness(10,4,10,4) };
+        StatusBanner = statusBar;
         statusText = new TextBlock { Text = "就绪", Foreground = T.B(T.FG2), FontSize = 11, FontFamily = T.UI, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
         statusBar.Child = statusText;
         tabContent.RowDefinitions.Add(new RowDefinition{Height=new GridLength(1,GridUnitType.Star)});
@@ -516,6 +517,7 @@ class MainWin : Window {
         StripBorder.Visibility = Visibility.Collapsed;
         RailCol.Width = new GridLength(0);
         SideCol.Width = new GridLength(0);
+        StatusBanner.Visibility = System.Windows.Visibility.Collapsed;
         var b = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
         WindowState = WindowState.Normal;
         Left = b.Left; Top = b.Top; Width = b.Width; Height = b.Height;
@@ -535,6 +537,7 @@ class MainWin : Window {
         StripBorder.Visibility = Visibility.Visible;
         RailCol.Width = new GridLength(48);
         SideCol.Width = new GridLength(270);
+        StatusBanner.Visibility = System.Windows.Visibility.Visible;
         CloseFsPopup();
         fullscreenTab = null;
         ssTimer.Stop(); ssTimer.Start();
