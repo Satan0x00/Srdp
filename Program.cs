@@ -67,8 +67,6 @@ class RdpAx : WF.AxHost {
 class Conn {
     public string Id = Guid.NewGuid().ToString("N");
     public string Name = "", Host = "", User = "", Pass = "", Group = "";
-    public bool NoNla;   // 鍏煎妯″紡:绂佺敤 NLA(xrdp 绛夌涓夋柟鏈嶅姟)
-    public int CDepth;   // 鑹叉繁:0=榛樿 32,xrdp 甯哥敤 24
     public int Port = 3389;
 }
 class Row { public Conn C; public Button Bd; public Ellipse Dot; public bool Sel; }
@@ -77,8 +75,7 @@ class Tab {
     public WinFormsHost Host; public RdpAx Ax; public dynamic Oc; public bool Dead;
     public string ReUser = "", RePass = "";
     public int LastW, LastH;
-    public bool Reconnecting, LoginDone, Degrade;
-    public int RetryCount;
+    public bool Reconnecting, LoginDone;
 }
 
 static class J {
@@ -150,8 +147,6 @@ static class J {
                 else if (key=="user") c.User = val;
                 else if (key=="pass") c.Pass = val;
                 else if (key=="group") c.Group = val;
-                else if (key=="nonla") c.NoNla = num!=0;
-                else if (key=="cdepth") c.CDepth = num;
                 else if (key=="port") c.Port = num>0?num:3389;
             }
             if (!string.IsNullOrEmpty(c.Host)) list.Add(c);
@@ -168,9 +163,7 @@ static class J {
               .Append(",\"port\":").Append(c.Port)
               .Append(",\"user\":").Append(Esc(c.User))
               .Append(",\"pass\":").Append(Esc(c.Pass))
-              .Append(",\"group\":").Append(Esc(c.Group))
-              .Append(",\"nonla\":").Append(c.NoNla ? 1 : 0)
-              .Append(",\"cdepth\":").Append(c.CDepth).Append("}");
+              .Append(",\"group\":").Append(Esc(c.Group)).Append("}");
             sb.Append(i<cs.Count-1 ? ",\n" : "\n");
         }
         return sb.Append(']').ToString();
@@ -795,7 +788,6 @@ class MainWin : Window {
                             }));
                             ComEventsHelper.Combine(oc, evGuid, 2, new Diag.EmptyEv(() => {
                                 tab.Reconnecting = false;
-                                tab.RetryCount = 0;
                                 Diag.Log("EV OnConnected");
                                 if (tab.Dot != null) tab.Dot.Fill = T.B(T.GREEN);
                                 SetStatus("已连接 " + tab.C.Host, T.GREEN);
@@ -805,20 +797,13 @@ class MainWin : Window {
                                 Diag.Log("EV OnLoginComplete");
                                 SetStatus("登录完成", T.GREEN);
                             }));
-                                if (tab.Degrade && !tab.C.NoNla) {
-                                    tab.C.NoNla = true; tab.C.CDepth = 24;
-                                    Save();
-                                    Diag.Log("compat settings saved for " + tab.C.Host);
-                                }
                             ComEventsHelper.Combine(oc, evGuid, 4, new Diag.ReasonEv(code => {
                                 if (tab.Dead) return;
                                 Diag.Log("EV OnDisconnected code=0x" + code.ToString("X") + " reconnecting=" + tab.Reconnecting);
-                                if (tab.RetryCount > 2) { tab.Reconnecting = false; Diag.Log("resize retry limit reached, stop"); if (tab.Dot != null) tab.Dot.Fill = T.B(T.RED); return; }
-                                tab.RetryCount++;
                                 if (tab.Reconnecting) { // 会话已断开:现在改分辨率是安全的,重连同一会话
                                     int w = (int)tab.Host.ActualWidth, h = (int)tab.Host.ActualHeight;
                                     if (w < 200 || h < 150) { w = 1920; h = 1080; }
-                                    SetStatus("Retrying in compatibility mode...", T.FG2);
+                                    SetStatus("正在适应窗口大小…", T.FG2);
                                     try {
                                         oc.DesktopWidth = w;
                                         oc.DesktopHeight = h;
@@ -829,15 +814,6 @@ class MainWin : Window {
                                         tab.Reconnecting = false;
                                         if (tab.Dot != null) tab.Dot.Fill = T.B(T.RED);
                                     }
-                                    return;
-                                }
-                                if (code != 1 && !tab.Degrade) {
-                                    tab.Degrade = true;
-                                    Diag.Log("auto compat retry (NLA off + 24bit)");
-                                    SetStatus("Retrying in compatibility mode...", T.FG2);
-                                    if (tab.Dot != null) tab.Dot.Fill = T.B(T.ACC);
-                                    SetProps(oc, tab);
-                                    oc.Connect();
                                     return;
                                 }
                                 string txt = "";
@@ -875,8 +851,7 @@ class MainWin : Window {
         if (tab.C.Port != 3389) oc.AdvancedSettings.RDPPort = tab.C.Port;
         // NLA(CredSSP): 旧版 AdvancedSettings 接口默认关闭,必须在 AdvancedSettings6 上显式开启,
         // 否则连接 NLA 强制的机器立即 0xB09("不支持网络级别身份验证")
-        bool nla = !tab.Degrade && !tab.C.NoNla;
-        oc.AdvancedSettings6.EnableCredSspSupport = nla;
+        oc.AdvancedSettings6.EnableCredSspSupport = true;
         // 会话画面随窗口缩放
         oc.AdvancedSettings.SmartSizing = true;
         // 关键:必须显式锁定会话分辨率。不设置时控件会把桌面尺寸自动同步为控件大小,
@@ -891,8 +866,7 @@ class MainWin : Window {
         oc.DesktopHeight = dh;
         if (!string.IsNullOrEmpty(tab.ReUser)) oc.UserName = tab.ReUser;
         if (tab.RePass.Length > 0) oc.AdvancedSettings.ClearTextPassword = tab.RePass;
-        int depth = tab.Degrade ? 24 : (tab.C.CDepth > 0 ? tab.C.CDepth : 32);
-        try { oc.ColorDepth = depth; } catch {}
+        try { oc.ColorDepth = 32; } catch {}
     }
     // 窗口缩放停止后,重设会话分辨率并重连同一会话(原生 1:1 清晰度,代替缩放模糊)
     void RequestResizeReconnect(Tab tab) {
