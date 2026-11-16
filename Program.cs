@@ -76,6 +76,7 @@ class Tab {
     public string ReUser = "", RePass = "";
     public int LastW, LastH;
     public bool Reconnecting, LoginDone;
+    public DateTime LoginAt;
 }
 
 static class J {
@@ -281,6 +282,7 @@ class MainWin : Window {
     // 小幅变化(<100px)交给 SmartSizing 缩放兜底,避免频繁重连
     void ResizeToHost() {
         if (activeTab == null || activeTab.Oc == null || activeTab.Dead || !activeTab.LoginDone) return;
+        if ((DateTime.Now - activeTab.LoginAt).TotalSeconds < 8) return; // 登录后宽限期:布局仍在收敛,禁止立即重连
         int w = (int)activeTab.Host.ActualWidth, h = (int)activeTab.Host.ActualHeight;
         if (w < 200 || h < 150) return; // 隐藏/极小的 tab 跳过
         if (Math.Abs(w - activeTab.LastW) < 300 && Math.Abs(h - activeTab.LastH) < 300) return;
@@ -796,7 +798,7 @@ class MainWin : Window {
                                 SetStatus("已连接 " + tab.C.Host, T.GREEN);
                             }));
                             ComEventsHelper.Combine(oc, evGuid, 3, new Diag.EmptyEv(() => {
-                                tab.LoginDone = true;
+                                tab.LoginDone = true; tab.LoginAt = DateTime.Now;
                                 Diag.Log("EV OnLoginComplete");
                                 SetStatus("登录完成", T.GREEN);
                             }));
