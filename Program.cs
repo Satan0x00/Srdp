@@ -267,7 +267,7 @@ class MainWin : Window {
     readonly List<Row> rows = new List<Row>();
     readonly List<Tab> tabs = new List<Tab>();
     StackPanel listPanel; TextBox searchBox; TextBlock watermark;
-    StackPanel tabStrip; Grid tabContent; TextBlock emptyHint;
+    StackPanel tabStrip; Grid tabContent; TextBlock emptyHint; Grid contentInner; TextBlock statusText;
     Button maxBtn;
     Row selected;
     System.Collections.Generic.Dictionary<string, Border> groupHeaders = new System.Collections.Generic.Dictionary<string, Border>();
@@ -424,8 +424,18 @@ class MainWin : Window {
         stripBorder.Child = new ScrollViewer { Content = tabStrip, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Grid.SetRow(stripBorder,0); mainGrid.Children.Add(stripBorder);
         tabContent = new Grid { Background = T.B(T.BG0) };
+        // 底部状态栏:连接/断开/错误信息常驻可见(不藏在 tooltip 里)
+        contentInner = new Grid { Background = T.B(T.BG0) };
+        tabContent.Children.Add(contentInner);
+        var statusBar = new Border { Background = T.B(T.BG1), BorderBrush = T.B(T.LINE), BorderThickness = new Thickness(0,1,0,0), Padding = new Thickness(10,4,10,4) };
+        statusText = new TextBlock { Text = "就绪", Foreground = T.B(T.FG2), FontSize = 11, FontFamily = T.UI, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        statusBar.Child = statusText;
+        tabContent.RowDefinitions.Add(new RowDefinition{Height=new GridLength(1,GridUnitType.Star)});
+        tabContent.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});
+        Grid.SetRow(contentInner,0); Grid.SetRow(statusBar,1);
+        tabContent.Children.Add(statusBar);
         emptyHint = new TextBlock { Text = "双击左侧连接，开始远程桌面", Foreground = T.B(T.FG2), FontSize = 13, FontFamily = T.UI, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        tabContent.Children.Add(emptyHint);
+        contentInner.Children.Add(emptyHint);
         Grid.SetRow(tabContent,1); mainGrid.Children.Add(tabContent);
         Grid.SetColumn(mainGrid,2); body.Children.Add(mainGrid);
 
@@ -670,6 +680,9 @@ class MainWin : Window {
         if (selected != null) { selected.Sel = false; selected.Bd.Background = Brushes.Transparent; }
         selected = r; r.Sel = true; r.Bd.Background = T.B(T.BG3);
     }
+    void SetStatus(string s, string color) {
+        if (statusText != null) { statusText.Text = s; statusText.Foreground = T.B(color); }
+    }
     void FilterList() {
         string q = (searchBox.Text ?? "").Trim().ToLowerInvariant();
         watermark.Visibility = string.IsNullOrEmpty(searchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
@@ -696,6 +709,7 @@ class MainWin : Window {
         tg.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
         tg.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
         tg.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        tg.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
         tab.Dot = new Ellipse { Width=7, Height=7, Fill=T.B(T.DOT), VerticalAlignment=VerticalAlignment.Center, Margin=new Thickness(0,0,8,0) };
         tg.Children.Add(tab.Dot);
         tab.Label = new TextBlock { Text = c.Name, Foreground = T.B(T.FG), FontSize = 12, FontFamily = T.UI, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 160, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -710,62 +724,122 @@ class MainWin : Window {
         tab.Bd.MouseLeftButtonUp += (s,e)=> SelectTab(tab);
         tabStrip.Children.Add(tab.Bd);
         tab.Host.Visibility = Visibility.Collapsed;
-        tabContent.Children.Add(tab.Host);
+        contentInner.Children.Add(tab.Host);
         tabs.Add(tab);
         SelectTab(tab);
+        SetStatus("正在连接 " + c.Host + " …", T.FG2);
         Dispatcher.BeginInvoke(new Action(()=>{
             if (tab.Dead) return;
             try {
-                Diag.Log("Connect tab host=" + tab.C.Host + " hostSize=" + (int)tab.Host.ActualWidth + "x" + (int)tab.Host.ActualHeight);
-                var oc = tab.Ax.Oc;
-                // COM 事件:IID={336d5562-efa8-482e-8cb3-c5c0fc7a7db6}(_IMsTscAxEvents,提取自 mstscax.dll 类型库)
-                var evGuid = new Guid("336d5562-efa8-482e-8cb3-c5c0fc7a7db6");
-                ComEventsHelper.Combine(oc, evGuid, 1, new Diag.EmptyEv(() => {
-                    if (tab.Dot != null && !tab.Reconnecting) tab.Dot.Fill = T.B("#FFD60A"); // 连接中=黄
-                }));
-                ComEventsHelper.Combine(oc, evGuid, 2, new Diag.EmptyEv(() => {
-                    tab.Reconnecting = false;
-                    Diag.Log("EV OnConnected");
-                    if (tab.Dot != null) tab.Dot.Fill = T.B(T.GREEN);
-                }));
-                ComEventsHelper.Combine(oc, evGuid, 3, new Diag.EmptyEv(() => {
-                    tab.LoginDone = true;
-                    Diag.Log("EV OnLoginComplete");
-                }));
-                ComEventsHelper.Combine(oc, evGuid, 4, new Diag.ReasonEv(code => {
-                    if (tab.Dead) return;
-                    Diag.Log("EV OnDisconnected code=0x" + code.ToString("X") + " reconnecting=" + tab.Reconnecting);
-                    if (tab.Reconnecting) { // 会话已断开:现在改分辨率是安全的,重连同一会话
-                        int w = (int)tab.Host.ActualWidth, h = (int)tab.Host.ActualHeight;
-                        if (w < 200 || h < 150) { w = 1920; h = 1080; }
-                        try {
-                            oc.DesktopWidth = w;
-                            oc.DesktopHeight = h;
-                            oc.Connect();
-                            Diag.Log("resize reconnect ok " + w + "x" + h);
-                        } catch (Exception ex) {
-                            Diag.Log("resize reconnect EXC " + ex.Message);
-                            tab.Reconnecting = false;
-                            if (tab.Dot != null) tab.Dot.Fill = T.B(T.RED);
+                Diag.Log("Connect tab host=" + tab.C.Host + ":" + tab.C.Port + " hostSize=" + (int)tab.Host.ActualWidth + "x" + (int)tab.Host.ActualHeight);
+                // 1. DNS 预检:解析失败立即给出明确原因,不让用户干等
+                SetStatus("正在解析 " + tab.C.Host + " …", T.FG2);
+                System.Net.IPAddress[] addrs = null;
+                try { addrs = System.Net.Dns.GetHostAddresses(tab.C.Host); } catch {}
+                if (addrs == null || addrs.Length == 0) {
+                    Diag.Log("DNS fail " + tab.C.Host);
+                    SetStatus("无法解析主机名 " + tab.C.Host, T.RED);
+                    DarkMsg.Info(this, "连接失败", "无法解析主机名: " + tab.C.Host + "\n\n请检查地址填写是否正确、域名是否已过期。");
+                    CloseTab(tab);
+                    return;
+                }
+                Diag.Log("DNS ok: " + string.Join(", ", addrs.Select(a => a.ToString())));
+                // 2. TCP 端口预检(后台线程 4 秒超时):不通立即给出原因与检查清单,不让用户对着黑屏干等
+                SetStatus("正在检测 " + tab.C.Host + ":" + tab.C.Port + " 端口连通性…", T.FG2);
+                System.Threading.Tasks.Task.Run(new Action(() => {
+                    string err = null;
+                    try {
+                        // 逐地址尝试(IPv4/IPv6 都试),全部失败才判定端口不通
+                        System.Net.Sockets.TcpClient okTcp = null;
+                        foreach (var a in addrs) {
+                            System.Net.Sockets.TcpClient tcp = null;
+                            try {
+                                tcp = new System.Net.Sockets.TcpClient(a.AddressFamily);
+                                var ar = tcp.BeginConnect(a, tab.C.Port, null, null);
+                                if (ar.AsyncWaitHandle.WaitOne(3000)) { tcp.EndConnect(ar); okTcp = tcp; break; }
+                            } catch {}
+                            try { tcp.Close(); } catch {}
                         }
-                        return;
-                    }
-                    string txt = "";
-                    try { txt = oc.GetErrorDescription(code, 2052); } catch {}
-                    if (tab.Dot != null) tab.Dot.Fill = T.B(T.RED);
-                    if (tab.Label != null) {
-                        tab.Label.Text += " (已断开)";
-                        tab.Label.ToolTip = string.IsNullOrEmpty(txt) ? ("断开 0x" + code.ToString("X")) : txt;
-                    }
-                }));
-                tab.ReUser = c.User;
-                tab.RePass = Secret.Dec(c.Pass);
-                SetProps(oc, tab);
-                oc.Connect();
-                tab.Oc = oc;
-                tab.Host.SizeChanged += (s,e)=> { ssTimer.Stop(); ssTimer.Start(); };
+                        if (okTcp == null) err = "所有地址(" + addrs.Length + " 个)均无法在 3 秒内建立连接";
+                        else okTcp.Close();
+                    } catch (Exception ex) { err = ex.Message; }
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        if (tab.Dead) return;
+                        if (err != null) {
+                            Diag.Log("TCP probe fail " + tab.C.Host + ":" + tab.C.Port + " " + err);
+                            SetStatus("无法连接 " + tab.C.Host + ":" + tab.C.Port, T.RED);
+                            DarkMsg.Info(this, "连接失败",
+                                "无法连接到 " + tab.C.Host + ":" + tab.C.Port + "\n\n" + err + "\n\n请检查:\n" +
+                                "- 远程机的远程桌面服务是否已开启\n" +
+                                "- 防火墙 / 端口映射是否放行 " + tab.C.Port + " 端口\n" +
+                                "- 域名解析是否指向正确的机器(当前解析到 " + (addrs.Length > 0 ? addrs[0].ToString() : "?") + ")");
+                            CloseTab(tab);
+                            return;
+                        }
+                        Diag.Log("TCP probe ok " + tab.C.Host + ":" + tab.C.Port);
+                        SetStatus("正在建立远程会话…", T.FG2);
+                        try {
+                            var oc = tab.Ax.Oc;
+                            // COM 事件:IID={336d5562-efa8-482e-8cb3-c5c0fc7a7db6}(_IMsTscAxEvents,提取自 mstscax.dll 类型库)
+                            var evGuid = new Guid("336d5562-efa8-482e-8cb3-c5c0fc7a7db6");
+                            ComEventsHelper.Combine(oc, evGuid, 1, new Diag.EmptyEv(() => {
+                                if (tab.Dot != null && !tab.Reconnecting) tab.Dot.Fill = T.B("#FFD60A"); // 连接中=黄
+                                SetStatus("正在连接 " + tab.C.Host + " …", T.FG2);
+                            }));
+                            ComEventsHelper.Combine(oc, evGuid, 2, new Diag.EmptyEv(() => {
+                                tab.Reconnecting = false;
+                                Diag.Log("EV OnConnected");
+                                if (tab.Dot != null) tab.Dot.Fill = T.B(T.GREEN);
+                                SetStatus("已连接 " + tab.C.Host, T.GREEN);
+                            }));
+                            ComEventsHelper.Combine(oc, evGuid, 3, new Diag.EmptyEv(() => {
+                                tab.LoginDone = true;
+                                Diag.Log("EV OnLoginComplete");
+                                SetStatus("登录完成", T.GREEN);
+                            }));
+                            ComEventsHelper.Combine(oc, evGuid, 4, new Diag.ReasonEv(code => {
+                                if (tab.Dead) return;
+                                Diag.Log("EV OnDisconnected code=0x" + code.ToString("X") + " reconnecting=" + tab.Reconnecting);
+                                if (tab.Reconnecting) { // 会话已断开:现在改分辨率是安全的,重连同一会话
+                                    int w = (int)tab.Host.ActualWidth, h = (int)tab.Host.ActualHeight;
+                                    if (w < 200 || h < 150) { w = 1920; h = 1080; }
+                                    SetStatus("正在适应窗口大小…", T.FG2);
+                                    try {
+                                        oc.DesktopWidth = w;
+                                        oc.DesktopHeight = h;
+                                        oc.Connect();
+                                        Diag.Log("resize reconnect ok " + w + "x" + h);
+                                    } catch (Exception ex) {
+                                        Diag.Log("resize reconnect EXC " + ex.Message);
+                                        tab.Reconnecting = false;
+                                        if (tab.Dot != null) tab.Dot.Fill = T.B(T.RED);
+                                    }
+                                    return;
+                                }
+                                string txt = "";
+                                try { txt = oc.GetErrorDescription(code, 2052); } catch {}
+                                if (tab.Dot != null) tab.Dot.Fill = T.B(T.RED);
+                                SetStatus("已断开: " + (string.IsNullOrEmpty(txt) ? ("0x" + code.ToString("X")) : txt), T.RED);
+                                if (tab.Label != null) {
+                                    tab.Label.Text += " (已断开)";
+                                    tab.Label.ToolTip = string.IsNullOrEmpty(txt) ? ("断开 0x" + code.ToString("X")) : txt;
+                                }
+                            }));
+                            tab.ReUser = tab.C.User;
+                            tab.RePass = Secret.Dec(tab.C.Pass);
+                            SetProps(oc, tab);
+                            oc.Connect();
+                            tab.Oc = oc;
+                            tab.Host.SizeChanged += (s,e)=> { ssTimer.Stop(); ssTimer.Start(); };
+                        } catch (Exception ex) {
+                            Diag.Log("conn EXC: " + ex.GetType().Name + " " + ex.Message);
+                            DarkMsg.Info(this, "连接失败", ex.Message);
+                            CloseTab(tab);
+                        }
+                    }), DispatcherPriority.Normal);
+                })); // end Task.Run (TCP probe)
             } catch (Exception ex) {
-                Diag.Log("conn EXC: " + ex.GetType().Name + " " + ex.Message);
+                Diag.Log("probe EXC: " + ex.GetType().Name + " " + ex.Message);
                 DarkMsg.Info(this, "连接失败", ex.Message);
                 CloseTab(tab);
             }
