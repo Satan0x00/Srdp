@@ -26,8 +26,8 @@ using System.Reflection;
 [assembly: AssemblyProduct("Srdp")]
 [assembly: AssemblyCopyright("Copyright (C) 2026 Srdp")]
 [assembly: AssemblyTrademark("")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 
 static class T {
@@ -283,7 +283,7 @@ class MainWin : Window {
         if (activeTab == null || activeTab.Oc == null || activeTab.Dead || !activeTab.LoginDone) return;
         int w = (int)activeTab.Host.ActualWidth, h = (int)activeTab.Host.ActualHeight;
         if (w < 200 || h < 150) return; // 隐藏/极小的 tab 跳过
-        if (Math.Abs(w - activeTab.LastW) < 200 && Math.Abs(h - activeTab.LastH) < 200) return;
+        if (Math.Abs(w - activeTab.LastW) < 300 && Math.Abs(h - activeTab.LastH) < 300) return;
         activeTab.LastW = w; activeTab.LastH = h;
         activeTab.Reconnecting = true;
         if (activeTab.Dot != null) activeTab.Dot.Fill = T.B(T.ACC);
@@ -492,7 +492,7 @@ class MainWin : Window {
     }
     void AboutDialog() {
         DarkMsg.Info(this, "关于 Srdp",
-            "Srdp v1.0.0 - 极简现代远程桌面管理器\n\n" +
+            "Srdp v1.1.0 - 极简现代远程桌面管理器\n\n" +
             "引擎: Microsoft MsTscAx(与 mstsc 同源)\n" +
             "特性: 会话分辨率跟随窗口 / 真全屏 / 连接分组\n" +
             "      凭据 DPAPI 加密存储 / 32 位色深\n" +
@@ -833,6 +833,7 @@ class MainWin : Window {
                             SetProps(oc, tab);
                             oc.Connect();
                             tab.Oc = oc;
+                            tab.LastW = (int)tab.Host.ActualWidth; tab.LastH = (int)tab.Host.ActualHeight;
                             tab.Host.SizeChanged += (s,e)=> { ssTimer.Stop(); ssTimer.Start(); };
                         } catch (Exception ex) {
                             Diag.Log("conn EXC: " + ex.GetType().Name + " " + ex.Message);
@@ -868,6 +869,8 @@ class MainWin : Window {
         }
         oc.DesktopWidth = dw;
         oc.DesktopHeight = dh;
+        // 键盘响应速度:客户端钩子直通模式(默认的 server 钩子模式每次按键都要往返远程确认,首次登录后有几十秒延迟)
+        try { oc.AdvancedSettings.KeyboardHookMode = 1; } catch {}
         if (!string.IsNullOrEmpty(tab.ReUser)) oc.UserName = tab.ReUser;
         if (tab.RePass.Length > 0) oc.AdvancedSettings.ClearTextPassword = tab.RePass;
         try { oc.ColorDepth = 32; } catch {}
@@ -909,7 +912,7 @@ class MainWin : Window {
         // 切换标签后,若会话分辨率与当前窗口差异较大,自动重连以恢复 1:1 清晰度
         if (sel != null && sel.Oc != null && sel.LoginDone) {
             int cw = (int)sel.Host.ActualWidth, ch = (int)sel.Host.ActualHeight;
-            if (cw > 200 && ch > 150 && (Math.Abs(cw - sel.LastW) > 200 || Math.Abs(ch - sel.LastH) > 200)) {
+            if (cw > 200 && ch > 150 && (Math.Abs(cw - sel.LastW) > 300 || Math.Abs(ch - sel.LastH) > 300)) {
                 sel.LastW = cw; sel.LastH = ch;
                 var st = sel;
                 System.Threading.Tasks.Task.Delay(50).ContinueWith(_ =>
