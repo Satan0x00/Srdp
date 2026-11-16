@@ -797,6 +797,8 @@ class MainWin : Window {
                                 tab.Reconnecting = false;
                                 ssUserAction = false;
                                 Diag.Log("EV OnConnected");
+                                // 重连会重建显示设置:必须在 OnConnected 后恢复 SmartSizing,否则画面以 1:1 显示在控件中央
+                                try { oc.AdvancedSettings.SmartSizing = true; } catch {}
                                 if (tab.Dot != null) tab.Dot.Fill = T.B(T.GREEN);
                                 SetStatus("已连接 " + tab.C.Host, T.GREEN);
                             }));
