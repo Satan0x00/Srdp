@@ -283,7 +283,7 @@ class MainWin : Window {
         if (activeTab == null || activeTab.Oc == null || activeTab.Dead || !activeTab.LoginDone) return;
         int w = (int)activeTab.Host.ActualWidth, h = (int)activeTab.Host.ActualHeight;
         if (w < 200 || h < 150) return; // 隐藏/极小的 tab 跳过
-        if (Math.Abs(w - activeTab.LastW) < 100 && Math.Abs(h - activeTab.LastH) < 100) return;
+        if (Math.Abs(w - activeTab.LastW) < 200 && Math.Abs(h - activeTab.LastH) < 200) return;
         activeTab.LastW = w; activeTab.LastH = h;
         activeTab.Reconnecting = true;
         if (activeTab.Dot != null) activeTab.Dot.Fill = T.B(T.ACC);
@@ -861,6 +861,7 @@ class MainWin : Window {
         // 导致 SmartSizing 缩放永远 1:1(窗口放大后远程画面"还是小的")
         // 布局未完成时 ActualWidth 可能是 0,退回主屏分辨率兜底
         int dw = (int)tab.Host.ActualWidth, dh = (int)tab.Host.ActualHeight;
+        if (tab.LastW > 0) { dw = tab.LastW; dh = tab.LastH; }
         if (dw < 200 || dh < 150) {
             var scr = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
             dw = scr.Width; dh = scr.Height;
@@ -906,7 +907,15 @@ class MainWin : Window {
             if (on) activeTab = t;
         }
         // 切换标签后,若会话分辨率与当前窗口差异较大,自动重连以恢复 1:1 清晰度
-        if (sel != null && sel.Oc != null) { ssTimer.Stop(); ssTimer.Start(); }
+        if (sel != null && sel.Oc != null && sel.LoginDone) {
+            int cw = (int)sel.Host.ActualWidth, ch = (int)sel.Host.ActualHeight;
+            if (cw > 200 && ch > 150 && (Math.Abs(cw - sel.LastW) > 200 || Math.Abs(ch - sel.LastH) > 200)) {
+                sel.LastW = cw; sel.LastH = ch;
+                var st = sel;
+                System.Threading.Tasks.Task.Delay(50).ContinueWith(_ =>
+                    Dispatcher.BeginInvoke(new Action(() => { if (!st.Dead) ResizeToHost(); })));
+            }
+        }
     }
     void CloseTab(Tab t) {
         if (fullscreen && fullscreenTab == t) ExitFullscreen();
