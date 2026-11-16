@@ -275,17 +275,18 @@ class MainWin : Window {
     System.Collections.Generic.HashSet<string> collapsedGroups = new System.Collections.Generic.HashSet<string>();
     Border HeaderBar, RailBar, SideBar, StripBorder;
     ColumnDefinition RailCol, SideCol;
-    bool fullscreen; Tab fullscreenTab, resizeTab, activeTab;
+    bool fullscreen; Tab fullscreenTab, resizeTab, activeTab; bool ssUserAction;
     readonly DispatcherTimer ssTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
     // 会话分辨率跟随窗口:防抖后 断开→改分辨率→重连(活动会话上直接改 DesktopWidth 会 E_FAIL)
     // 会话分辨率跟随窗口:防抖 700ms 后只对当前活动 tab 重连(断开→改分辨率→重连同一会话)
     // 小幅变化(<100px)交给 SmartSizing 缩放兜底,避免频繁重连
     void ResizeToHost() {
         if (activeTab == null || activeTab.Oc == null || activeTab.Dead || !activeTab.LoginDone) return;
-        if ((DateTime.Now - activeTab.LoginAt).TotalSeconds < 8) return; // 登录后宽限期:布局仍在收敛,禁止立即重连
+        if ((DateTime.Now - activeTab.LoginAt).TotalSeconds < 8 && !ssUserAction) return; // 登录后宽限期只拦自动调度;用户主动变化立即对齐 // 登录后宽限期仅对自动触发生效,用户主动改变屏幕大小不受限
         int w = (int)activeTab.Host.ActualWidth, h = (int)activeTab.Host.ActualHeight;
         if (w < 200 || h < 150) return; // 隐藏/极小的 tab 跳过
-        if (Math.Abs(w - activeTab.LastW) < 300 && Math.Abs(h - activeTab.LastH) < 300) return;
+        int th = ssUserAction ? 120 : 300; // 用户主动变化(侧栏/全屏)阈值低,自动调度阈值高防抖
+        if (Math.Abs(w - activeTab.LastW) < th && Math.Abs(h - activeTab.LastH) < th) return;
         activeTab.LastW = w; activeTab.LastH = h;
         activeTab.Reconnecting = true;
         if (activeTab.Dot != null) activeTab.Dot.Fill = T.B(T.ACC);
@@ -332,7 +333,7 @@ class MainWin : Window {
             resizeTab = null;
         };
         ssTimer.Tick += (s,e)=> { ssTimer.Stop(); ResizeToHost(); };
-        SizeChanged += (s,e)=> { ssTimer.Stop(); ssTimer.Start(); };
+        SizeChanged += (s,e)=> { ssUserAction = true; ssTimer.Stop(); ssTimer.Start(); };
         StateChanged += (s,e)=> { if (maxBtn != null) maxBtn.Content = WindowState==WindowState.Maximized ? "\uE923" : "\uE922"; };
         InputBindings.Add(new KeyBinding(new RelayCommand(()=>Edit(null)), Key.N, ModifierKeys.Control));
     }
@@ -477,6 +478,7 @@ class MainWin : Window {
         };
         col.BeginAnimation(ColumnDefinition.WidthProperty, anim);
         btn.Foreground = T.B(sidebarOpen ? T.ACC : T.FG2);
+        ssUserAction = true; ssTimer.Stop(); ssTimer.Start(); // 侧栏宽度变化=用户主动,绕过登录宽限期
     }
     void RailMenu(object sender, RoutedEventArgs e) {
         var btn = (Button)sender;
@@ -525,7 +527,7 @@ class MainWin : Window {
         Left = b.Left; Top = b.Top; Width = b.Width; Height = b.Height;
         Topmost = true; // 覆盖任务栏
         ShowFsHandle(tab);
-        ssTimer.Stop(); ssTimer.Start(); // 会话分辨率更新为全屏尺寸
+        ssUserAction = true; ssTimer.Stop(); ssTimer.Start(); // 会话分辨率更新为全屏尺寸
     }
     void ExitFullscreen() {
         fullscreen = false;
@@ -542,7 +544,7 @@ class MainWin : Window {
         StatusBanner.Visibility = System.Windows.Visibility.Visible;
         CloseFsPopup();
         fullscreenTab = null;
-        ssTimer.Stop(); ssTimer.Start();
+        ssUserAction = true; ssTimer.Stop(); ssTimer.Start();
     }
     // 全屏顶部连接条(mstsc 风格):顶部中央常显小把手,鼠标悬浮展开操作条,离开自动缩回
     void ShowFsHandle(Tab tab) {
@@ -793,6 +795,7 @@ class MainWin : Window {
                             }));
                             ComEventsHelper.Combine(oc, evGuid, 2, new Diag.EmptyEv(() => {
                                 tab.Reconnecting = false;
+                                ssUserAction = false;
                                 Diag.Log("EV OnConnected");
                                 if (tab.Dot != null) tab.Dot.Fill = T.B(T.GREEN);
                                 SetStatus("已连接 " + tab.C.Host, T.GREEN);
@@ -817,7 +820,10 @@ class MainWin : Window {
                                     } catch (Exception ex) {
                                         Diag.Log("resize reconnect EXC " + ex.Message);
                                         tab.Reconnecting = false;
+                                        ssUserAction = false;
+                                        try { oc.AdvancedSettings.SmartSizing = false; oc.AdvancedSettings.SmartSizing = true; } catch {}
                                         if (tab.Dot != null) tab.Dot.Fill = T.B(T.RED);
+                                        SetStatus("分辨率对齐失败,已回退缩放显示", T.FG2);
                                     }
                                     return;
                                 }
@@ -836,7 +842,7 @@ class MainWin : Window {
                             oc.Connect();
                             tab.Oc = oc;
                             tab.LastW = (int)tab.Host.ActualWidth; tab.LastH = (int)tab.Host.ActualHeight;
-                            tab.Host.SizeChanged += (s,e)=> { ssTimer.Stop(); ssTimer.Start(); };
+                            tab.Host.SizeChanged += (s,e)=> { ssUserAction = true; ssTimer.Stop(); ssTimer.Start(); };
                         } catch (Exception ex) {
                             Diag.Log("conn EXC: " + ex.GetType().Name + " " + ex.Message);
                             DarkMsg.Info(this, "连接失败", ex.Message);
